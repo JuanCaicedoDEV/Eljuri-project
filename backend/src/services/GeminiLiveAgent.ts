@@ -18,10 +18,12 @@ const AUDIO_CONFIG = {
 };
 
 interface GeminiLiveConfig {
-    projectId: string; // Unused for API Key flow but kept for interface compat
+    projectId: string;
     apiKey?: string;
     voiceName?: string;
     systemInstruction?: string;
+    maxOutputTokens?: number;  // per-response token cap (default: 150 ≈ 2-3 sentences)
+    maxBudgetUSD?: number;      // session cost ceiling in USD (default: no limit)
 }
 
 export class GeminiLiveAgent extends EventEmitter {
@@ -29,6 +31,7 @@ export class GeminiLiveAgent extends EventEmitter {
     private isConnected: boolean = false;
     private audioBuffer: { mimeType: string, data: string }[] = [];
     private config: GeminiLiveConfig;
+    private accumulatedCostUSD: number = 0;  // running total for this session
 
     // MODEL: Gemini 2.5 Flash Native Audio Preview
     private model: string = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
@@ -118,10 +121,23 @@ export class GeminiLiveAgent extends EventEmitter {
                             }
                         }
                     }
+                    // Note: maxOutputTokens is NOT set here — it can cut responses mid-sentence.
+                    // Brevity is controlled via system prompt instead.
                 },
-                systemInstruction: this.config.systemInstruction ? {
-                    parts: [{ text: this.config.systemInstruction }]
-                } : undefined
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+                systemInstruction: (() => {
+                    const BREVITY_RULES = `REGLA MÁS IMPORTANTE — SIN EXCEPCIONES:
+Sé EXTREMADAMENTE conciso y directo. Máximo 1 oración corta por respuesta.
+Evita a toda costa dar discursos largos porque el formato de audio se satura.
+Ve directo al grano, sin rodeos, sin listas y sin repetir lo que dijo el usuario.
+El silencio vale más que el relleno. 
+
+---
+`;
+                    const base = this.config.systemInstruction || 'You are a helpful voice assistant.';
+                    return { parts: [{ text: BREVITY_RULES + base }] };
+                })()
             }
         };
 
@@ -136,9 +152,9 @@ export class GeminiLiveAgent extends EventEmitter {
         try {
             const message = JSON.parse(data.toString());
 
-            // Handle server content
+            // Handle server content (agent turns)
             if (message.serverContent) {
-                const { modelTurn, turnComplete, interrupted } = message.serverContent;
+                const { modelTurn, turnComplete, interrupted, outputTranscription } = message.serverContent;
 
                 if (modelTurn?.parts) {
                     for (const part of modelTurn.parts) {
@@ -147,16 +163,21 @@ export class GeminiLiveAgent extends EventEmitter {
                             const audioBuffer = Buffer.from(part.inlineData.data, 'base64');
                             this.emit('audio', audioBuffer);
                         }
-                        // Text transcript
+                        // Text transcript of agent response
                         if (part.text) {
-                            console.log('[GeminiLive] Transcript:', part.text);
+                            console.log('[GeminiLive] Agent transcript:', part.text);
                             this.emit('transcript', part.text);
                         }
                     }
                 }
 
+                // Output (agent) audio transcription
+                if (outputTranscription?.text) {
+                    console.log('[GeminiLive] Agent (transcribed):', outputTranscription.text);
+                    this.emit('transcript', outputTranscription.text);
+                }
+
                 if (turnComplete) {
-                    // console.log('[GeminiLive] Turn complete');
                     this.emit('turnComplete');
                 }
 
@@ -164,6 +185,13 @@ export class GeminiLiveAgent extends EventEmitter {
                     console.log('[GeminiLive] Agent interrupted by user');
                     this.emit('interrupted');
                 }
+            }
+
+            // Handle user speech transcription (inputAudioTranscription)
+            if (message.inputTranscription?.text) {
+                const userText = message.inputTranscription.text;
+                console.log('[GeminiLive] User (transcribed):', userText);
+                this.emit('userTranscript', userText);
             }
 
             // Check for Usage Metadata (often at root or inside serverContent depending on version)
@@ -179,24 +207,30 @@ export class GeminiLiveAgent extends EventEmitter {
                 const outTokens = usage.candidatesTokenCount || 0;
                 const totalTokens = usage.totalTokenCount || (inTokens + outTokens);
 
-                // Cost Estimation (Gemini 2.0 Paid Tier - Audio Rates)
-                // Reference: User provided (Feb 2026)
-                // Input (Audio): $3.00 USD / 1M tokens
-                // Output (Audio): $12.00 USD / 1M tokens
-
                 const inputCost = (inTokens / 1_000_000) * 3.00;
                 const outputCost = (outTokens / 1_000_000) * 12.00;
                 const totalCost = inputCost + outputCost;
 
-                console.log(`[GeminiLive] Usage: ${inTokens} in / ${outTokens} out. Cost: $${totalCost.toFixed(6)}`);
+                this.accumulatedCostUSD += totalCost;
+
+                console.log(`[GeminiLive] Usage: ${inTokens} in / ${outTokens} out. Turn cost: $${totalCost.toFixed(6)} | Session total: $${this.accumulatedCostUSD.toFixed(6)}`);
 
                 this.emit('usage', {
                     inTokens,
                     outTokens,
                     totalTokens,
-                    cost: totalCost,
+                    cost: this.accumulatedCostUSD,   // emit cumulative cost
+                    turnCost: totalCost,
                     model: this.model
                 });
+
+                // ─── Session budget ceiling ───────────────────────────────────
+                const limit = this.config.maxBudgetUSD;
+                if (limit !== undefined && this.accumulatedCostUSD >= limit) {
+                    console.warn(`[GeminiLive] 💸 Budget limit $${limit} reached ($${this.accumulatedCostUSD.toFixed(6)}). Terminating session.`);
+                    this.emit('budgetExceeded', { spent: this.accumulatedCostUSD, limit });
+                    this.disconnect();
+                }
             }
 
         } catch (error) {

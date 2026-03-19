@@ -24,8 +24,12 @@ interface PhoneNumberState {
     getPhoneNumbersByCampaign: (campaignId: string) => PhoneNumber[];
 }
 
-const API_BASE = 'http://localhost:3008/api';
-
+export const getApiBase = () => {
+    if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return `${window.location.protocol}//${window.location.hostname}:3008/api`;
+    }
+    return process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : 'http://localhost:3008/api';
+};
 export const usePhoneNumberStore = create<PhoneNumberState>((set, get) => ({
     phoneNumbers: [],
     isLoading: false,
@@ -34,6 +38,7 @@ export const usePhoneNumberStore = create<PhoneNumberState>((set, get) => ({
     fetchPhoneNumbers: async () => {
         set({ isLoading: true, error: null });
         try {
+            const API_BASE = getApiBase();
             const response = await fetch(`${API_BASE}/phone-numbers`);
             if (!response.ok) throw new Error('Failed to fetch phone numbers');
             const data = await response.json();
@@ -46,6 +51,7 @@ export const usePhoneNumberStore = create<PhoneNumberState>((set, get) => ({
     createPhoneNumber: async (phoneNumber: string, campaignId?: string, notes?: string) => {
         set({ isLoading: true, error: null });
         try {
+            const API_BASE = getApiBase();
             const response = await fetch(`${API_BASE}/phone-numbers`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -69,6 +75,7 @@ export const usePhoneNumberStore = create<PhoneNumberState>((set, get) => ({
     updatePhoneNumber: async (id: string, updates: Partial<PhoneNumber>) => {
         set({ isLoading: true, error: null });
         try {
+            const API_BASE = getApiBase();
             const response = await fetch(`${API_BASE}/phone-numbers/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -91,6 +98,7 @@ export const usePhoneNumberStore = create<PhoneNumberState>((set, get) => ({
     deletePhoneNumber: async (id: string) => {
         set({ isLoading: true, error: null });
         try {
+            const API_BASE = getApiBase();
             const response = await fetch(`${API_BASE}/phone-numbers/${id}`, {
                 method: 'DELETE'
             });

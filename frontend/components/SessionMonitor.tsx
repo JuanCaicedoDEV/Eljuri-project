@@ -27,9 +27,9 @@ export default function SessionMonitor() {
         const fetchBackendSessions = async () => {
             try {
                 // Dynamic API Base URL
-                const apiBase = typeof window !== 'undefined'
+                const apiBase = typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_BACKEND_URL
                     ? `${window.location.protocol}//${window.location.hostname}:3008/api`
-                    : 'http://localhost:3008/api';
+                    : (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : 'http://localhost:3008/api');
 
                 const response = await fetch(`${apiBase}/sessions`);
                 if (response.ok) {
@@ -53,9 +53,9 @@ export default function SessionMonitor() {
     const handleTerminate = async (sessionId: string) => {
         if (confirm('Are you sure you want to terminate this session?')) {
             try {
-                const apiBase = typeof window !== 'undefined'
+                const apiBase = typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_BACKEND_URL
                     ? `${window.location.protocol}//${window.location.hostname}:3008/api`
-                    : 'http://localhost:3008/api';
+                    : (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : 'http://localhost:3008/api');
 
                 const response = await fetch(`${apiBase}/sessions/${sessionId}/terminate`, {
                     method: 'POST'

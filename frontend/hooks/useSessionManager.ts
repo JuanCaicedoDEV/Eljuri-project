@@ -3,10 +3,10 @@ import { io, Socket } from 'socket.io-client';
 import { useSimulationStore, SessionState } from '../store/useSimulationStore';
 
 const getApiBase = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_BACKEND_URL) {
         return `${window.location.protocol}//${window.location.hostname}:3008/api`;
     }
-    return 'http://localhost:3008/api';
+    return process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : 'http://localhost:3008/api';
 };
 
 const API_BASE = getApiBase();
@@ -17,7 +17,7 @@ export const useSessionManager = () => {
 
     useEffect(() => {
         // Connect to WebSocket for real-time session updates
-        const socketHost = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3008` : 'http://localhost:3008';
+        const socketHost = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3008` : 'http://localhost:3008');
         socketRef.current = io(socketHost);
 
         socketRef.current.on('connect', () => {
@@ -44,9 +44,11 @@ export const useSessionManager = () => {
 
     // Create a new session
     const startSession = async (campaignId: string, phoneNumber?: string): Promise<SessionState> => {
+        console.log("Inside startSession. Getting state...");
         const { systemPrompt, agentType, flowData } = useSimulationStore.getState();
-
+        console.log("State retrieved. AgentType:", agentType, "API_BASE:", API_BASE);
         try {
+            console.log("Initiating fetch to API_BASE...");
             const response = await fetch(`${API_BASE}/sessions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -58,9 +60,11 @@ export const useSessionManager = () => {
                     flowData
                 })
             });
+            console.log("Fetch response received. Status:", response.status);
 
             if (!response.ok) {
                 const error = await response.json();
+                console.error("Fetch returned non-ok status:", error);
                 throw new Error(error.error || 'Failed to create session');
             }
 

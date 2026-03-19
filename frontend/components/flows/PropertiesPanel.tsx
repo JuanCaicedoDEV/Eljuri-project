@@ -42,7 +42,12 @@ export default function PropertiesPanel({ selectedNode, onClose }: PropertiesPan
 
                     return {
                         ...node,
-                        data: { ...node.data, label: newLabel, options },
+                        data: {
+                            ...node.data,
+                            label: newLabel,
+                            text: label,   // raw text, used by flowToPrompt
+                            options,
+                        },
                     };
                 }
                 return node;

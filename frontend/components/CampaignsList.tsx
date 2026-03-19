@@ -1,28 +1,14 @@
 "use client";
 
 import React from 'react';
-import { Plus, Briefcase, Users, Phone, ArrowUpRight, Search, Filter, Activity, Globe } from 'lucide-react';
+import { Plus, Briefcase, ArrowUpRight, Search, Filter } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useSimulationStore } from '../store/useSimulationStore';
-
-interface Campaign {
-    id: string;
-    name: string;
-    description: string;
-    agents: number;
-    calls: number;
-    status: 'active' | 'paused';
-}
-
-const MOCK_CAMPAIGNS: Campaign[] = [
-    { id: 'campaign-1', name: 'Real Estate Outreach', description: 'Lead qualification for FL residential markets', agents: 5, calls: 1240, status: 'active' },
-    { id: 'campaign-2', name: 'Customer Support Bot', description: 'L1 automated technical support routing', agents: 2, calls: 850, status: 'active' },
-    { id: 'campaign-3', name: 'ELjuri Premium Sales', description: 'High-intent outbound sales for enterprise', agents: 8, calls: 3200, status: 'paused' },
-];
+import { CAMPAIGN_CONFIGS } from '../store/campaignConfigs';
 
 export default function CampaignsList({ onSelect, onCreate }: { onSelect: (id: string) => void, onCreate: () => void }) {
     const { getSessionsByCampaign } = useSimulationStore();
@@ -106,7 +92,7 @@ export default function CampaignsList({ onSelect, onCreate }: { onSelect: (id: s
 
             {/* Campaign Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-8">
-                {MOCK_CAMPAIGNS.map((campaign, idx) => (
+                {CAMPAIGN_CONFIGS.map((campaign, idx) => (
                     <motion.div
                         key={campaign.id}
                         initial={{ opacity: 0, y: 20 }}
@@ -161,7 +147,7 @@ export default function CampaignsList({ onSelect, onCreate }: { onSelect: (id: s
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 * (MOCK_CAMPAIGNS.length + 1) }}
+                    transition={{ delay: 0.1 * (CAMPAIGN_CONFIGS.length + 1) }}
                     className="h-full"
                 >
                     <div className="h-[420px] border-2 border-dashed border-zinc-100 rounded-[3rem] p-10 flex flex-col items-center justify-center gap-6 hover:bg-zinc-50 transition-all duration-500 cursor-pointer group">

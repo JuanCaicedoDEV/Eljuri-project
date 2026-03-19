@@ -21,7 +21,7 @@ export const useSimulation = (sessionId: string, onAudioReceived?: (audioBase64:
     const flowData = session?.flowData || defaultFlowData;
 
     useEffect(() => {
-        const socketHost = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3008` : 'http://localhost:3008';
+        const socketHost = process.env.NEXT_PUBLIC_BACKEND_URL || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3008` : 'http://localhost:3008');
         console.log(`[Simulation] Connecting to socket at ${socketHost}`);
         socketRef.current = io(socketHost);
 

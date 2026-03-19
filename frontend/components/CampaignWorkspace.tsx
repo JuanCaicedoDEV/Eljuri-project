@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useSimulationStore } from '../store/useSimulationStore';
 import { usePhoneNumberStore } from '../store/usePhoneNumberStore';
 import { useSessionManager } from '../hooks/useSessionManager';
-import { Terminal, LayoutGrid, Phone, Play, ArrowLeft, Save, ShieldCheck, Cpu, Code2, Sparkles, ChevronRight, Settings2, Users } from 'lucide-react';
+import { Terminal, LayoutGrid, Phone, Play, ArrowLeft, Save, ShieldCheck, Cpu, Code2, Sparkles, ChevronRight, Settings2, Users, PhoneCall, PhoneOff, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,6 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import FlowEditor from './FlowEditor';
+
+import { getCampaignConfig } from '../store/campaignConfigs';
 
 export default function CampaignWorkspace({ campaignId, onBack, onTest }: {
     campaignId: string,
@@ -24,19 +26,74 @@ export default function CampaignWorkspace({ campaignId, onBack, onTest }: {
     const { startSession } = useSessionManager();
     const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
 
+    // Real call state
+    const [realCallTarget, setRealCallTarget] = useState('');
+    const [realCallStatus, setRealCallStatus] = useState<'idle' | 'dialing' | 'active' | 'ended' | 'error'>('idle');
+    const [realCallSid, setRealCallSid] = useState<string | null>(null);
+    const [realCallError, setRealCallError] = useState<string | null>(null);
+
     const campaignPhones = phoneNumbers.filter(pn => pn.campaignId === campaignId);
     const activeSessions = getSessionsByCampaign(campaignId);
+
+    // Pre-load system prompt & schema for this campaign (if it has a known config)
+    useEffect(() => {
+        const config = getCampaignConfig(campaignId);
+        if (config) {
+            setSystemPrompt(config.systemPrompt);
+            setExpectedOutput(config.expectedOutput);
+        }
+    }, [campaignId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         fetchPhoneNumbers();
     }, [fetchPhoneNumbers]);
 
-    const handleRunSimulation = async () => {
+    const handleRealCall = async () => {
+        if (!realCallTarget.trim()) return;
+        setRealCallStatus('dialing');
+        setRealCallError(null);
         try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
+            const res = await fetch(`${backendUrl}/api/calls/outbound`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: realCallTarget.trim(),
+                    campaignId,
+                    systemInstruction: systemPrompt,
+                    voiceName: 'Kore',
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al iniciar llamada');
+            setRealCallSid(data.callSid);
+            setRealCallStatus('active');
+        } catch (err: any) {
+            setRealCallError(err.message);
+            setRealCallStatus('error');
+        }
+    };
+
+    const handleEndCall = async () => {
+        if (!realCallSid) return;
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
+            await fetch(`${backendUrl}/api/calls/${realCallSid}/end`, { method: 'POST' });
+        } catch (_) {}
+        setRealCallStatus('ended');
+        setRealCallSid(null);
+    };
+
+    const handleRunSimulation = async () => {
+        console.log("handleRunSimulation clicked! Campaign:", campaignId, "Phone:", selectedPhone);
+        try {
+            console.log("Calling startSession...");
             const session = await startSession(campaignId, selectedPhone || undefined);
+            console.log("startSession returned:", session);
             onTest(session.sessionId);
+            console.log("onTest called successfully.");
         } catch (error) {
-            console.error("Failed to start session:", error);
+            console.error("Failed to start session in Catch:", error);
             // Fallback to local test if backend fails
             onTest(`test-${campaignId}-${Date.now()}`);
         }
@@ -236,6 +293,64 @@ export default function CampaignWorkspace({ campaignId, onBack, onTest }: {
                             <span className="text-[8px] font-black uppercase tracking-widest">Encrypted Sandbox Environment</span>
                         </div>
                     </Card>
+                </div>
+
+                {/* ── Real Call Panel ─────────────────────────────────── */}
+                <div className="border border-zinc-200 rounded-[2rem] p-6 space-y-4 bg-white shadow-sm">
+                    <div className="flex items-center gap-2">
+                        <PhoneCall size={14} strokeWidth={2.5} className="text-emerald-600" />
+                        <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Llamada Real</span>
+                        <span className="ml-auto text-[8px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase tracking-widest">Colombia · Ecuador</span>
+                    </div>
+
+                    <input
+                        type="tel"
+                        value={realCallTarget}
+                        onChange={(e) => setRealCallTarget(e.target.value)}
+                        placeholder="+57300000000 o +593900000000"
+                        disabled={realCallStatus === 'dialing' || realCallStatus === 'active'}
+                        className="w-full px-4 py-3 rounded-xl border border-zinc-200 text-sm font-mono text-zinc-700 placeholder-zinc-300 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:opacity-50 disabled:bg-zinc-50"
+                    />
+
+                    {realCallStatus === 'idle' || realCallStatus === 'ended' || realCallStatus === 'error' ? (
+                        <button
+                            onClick={handleRealCall}
+                            disabled={!realCallTarget.trim()}
+                            className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95"
+                        >
+                            <PhoneCall size={14} /> Iniciar Llamada
+                        </button>
+                    ) : realCallStatus === 'dialing' ? (
+                        <button disabled className="w-full h-12 rounded-xl bg-zinc-100 text-zinc-400 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
+                            <Loader2 size={14} className="animate-spin" /> Marcando…
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleEndCall}
+                            className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 animate-pulse"
+                        >
+                            <PhoneOff size={14} /> Colgar
+                        </button>
+                    )}
+
+                    {realCallStatus === 'active' && realCallSid && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-xl border border-emerald-100">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-[9px] font-mono text-emerald-700 truncate">{realCallSid}</span>
+                        </div>
+                    )}
+
+                    {realCallStatus === 'ended' && (
+                        <p className="text-[9px] text-center text-zinc-400 font-bold uppercase tracking-widest">Llamada finalizada</p>
+                    )}
+
+                    {realCallStatus === 'error' && realCallError && (
+                        <p className="text-[9px] text-red-500 font-bold text-center">{realCallError}</p>
+                    )}
+
+                    <p className="text-[8px] text-zinc-300 text-center leading-relaxed">
+                        Requiere Twilio configurado en <span className="font-mono">.env</span> y ngrok activo.
+                    </p>
                 </div>
             </aside>
         </motion.div>

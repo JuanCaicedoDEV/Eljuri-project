@@ -11,6 +11,10 @@ export interface VoiceLiveConfig {
     language?: 'es' | 'en';
     accent?: string;
     sessionId?: string;
+    // Cost controls
+    maxOutputTokens?: number;      // per-response token limit sent to Gemini (default: 150)
+    maxBudgetUSD?: number;         // session cost ceiling in USD (e.g. 0.05)
+    maxAgentSpeakSeconds?: number; // client-side audio timeout: interrupt after N seconds of continuous speech
 }
 
 export class VoiceLiveClient {
@@ -19,22 +23,28 @@ export class VoiceLiveClient {
     private systemInstruction?: string;
     private language: 'es' | 'en';
     private accent: string;
+    private maxOutputTokens: number;
+    private maxBudgetUSD?: number;
     private websocket: WebSocket | null = null;
     private audioContext: AudioContext | null = null;
     private audioStream: MediaStream | null = null;
     private audioWorklet: AudioWorkletNode | null = null;
     private isConnected: boolean = false;
+    private destroyed: boolean = false;  // set on disconnect() to abort in-flight connect()
     private audioQueue: AudioBuffer[] = [];
     private isPlaying: boolean = false;
+    private nextPlayTime: number = 0;
 
     // Callbacks
     public onConnected: ((voice: string) => void) | null = null;
     public onDisconnected: (() => void) | null = null;
     public onAudio: ((audioData: ArrayBuffer) => void) | null = null;
     public onTranscript: ((text: string) => void) | null = null;
+    public onUserTranscript: ((text: string) => void) | null = null;
     public onError: ((error: string) => void) | null = null;
     public onTurnComplete: (() => void) | null = null;
     public onUsage: ((stats: { inTokens: number, outTokens: number, cost: number, model: string }) => void) | null = null;
+    public onBudgetExceeded: ((info: { spent: number; limit: number }) => void) | null = null;
 
     constructor(config: VoiceLiveConfig = {}) {
         const defaultHost = typeof window !== 'undefined'
@@ -43,12 +53,15 @@ export class VoiceLiveClient {
         this.serverUrl = config.serverUrl || `ws://${defaultHost}/voice/live`;
 
         if (config.sessionId) {
-            this.serverUrl += `?sessionId=${config.sessionId}`;
+            this.serverUrl += `?sessionId=${encodeURIComponent(config.sessionId)}`;
         }
+
 
         this.voiceName = config.voiceName || 'Kore';
         this.language = config.language || 'es';
         this.accent = config.accent || 'ecuadorian';
+        this.maxOutputTokens = config.maxOutputTokens ?? 150;
+        this.maxBudgetUSD = config.maxBudgetUSD;
 
         // Generate system instruction if not explicitly provided
         this.systemInstruction = config.systemInstruction || this.generateSystemInstruction();
@@ -100,6 +113,30 @@ REGLAS CRÍTICAS / CRITICAL RULES:
     }
 
     /**
+     * Fetch a short-lived JWT from the backend token endpoint.
+     */
+    private async fetchToken(): Promise<string> {
+        const apiUrl = this.serverUrl
+            .replace(/^ws:\/\//, 'http://')
+            .replace(/^wss:\/\//, 'https://')
+            .replace(/\/voice\/live.*$/, '/api/auth/token');
+
+        const apiKey = process.env.NEXT_PUBLIC_VOICE_SIMULATOR_API_KEY;
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Token fetch failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.token as string;
+    }
+
+    /**
      * Initialize audio context and connect to server
      */
     async connect(): Promise<void> {
@@ -109,6 +146,10 @@ REGLAS CRÍTICAS / CRITICAL RULES:
         }
 
         try {
+            // Fetch JWT before opening WebSocket
+            const token = await this.fetchToken();
+            if (this.destroyed) return;  // aborted during fetchToken
+
             // Initialize AudioContext at 24kHz (Gemini requirement)
             this.audioContext = new AudioContext({
                 sampleRate: 24000
@@ -124,19 +165,19 @@ REGLAS CRÍTICAS / CRITICAL RULES:
                     autoGainControl: true
                 }
             });
+            if (this.destroyed) {
+                this.audioStream.getTracks().forEach(t => t.stop());
+                return;
+            }
 
             // Connect WebSocket
             this.websocket = new WebSocket(this.serverUrl);
             this.websocket.binaryType = 'arraybuffer';
 
             this.websocket.onopen = () => {
-                console.log('[VoiceLive] 🎙️ WebSocket open, sending config...');
-                // Send config message with voice selection
-                this.websocket?.send(JSON.stringify({
-                    type: 'config',
-                    voiceName: this.voiceName,
-                    systemInstruction: this.systemInstruction
-                }));
+                console.log('[VoiceLive] 🎙️ WebSocket open, sending auth...');
+                // Step 1: authenticate with JWT
+                this.websocket?.send(JSON.stringify({ type: 'auth', token }));
             };
 
             this.websocket.onmessage = async (event) => {
@@ -188,6 +229,11 @@ REGLAS CRÍTICAS / CRITICAL RULES:
         }
 
         try {
+            // Resume AudioContext (may be suspended if created without user gesture)
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+
             // Load AudioWorklet module
             await this.audioContext.audioWorklet.addModule('/audio-processor.js');
 
@@ -257,8 +303,10 @@ REGLAS CRÍTICAS / CRITICAL RULES:
      * Disconnect from server
      */
     disconnect(): void {
+        this.destroyed = true;  // abort any in-flight connect()
         this.stopStreaming();
         this.stopPlayback();
+        this.audioQueue = [];  // flush any buffered audio so agent stops playing immediately
 
         if (this.audioStream) {
             this.audioStream.getTracks().forEach(track => track.stop());
@@ -266,16 +314,20 @@ REGLAS CRÍTICAS / CRITICAL RULES:
         }
 
         if (this.audioContext) {
-            this.audioContext.close();
+            this.audioContext.close().catch(() => { });
             this.audioContext = null;
         }
 
         if (this.websocket) {
+            this.websocket.onclose = null;  // prevent onclose from firing callbacks after intentional disconnect
+            this.websocket.onmessage = null;
+            this.websocket.onerror = null;
             this.websocket.close();
             this.websocket = null;
         }
 
         this.isConnected = false;
+        this.onDisconnected?.();  // always signal UI to reset
         console.log('[VoiceLive] Disconnected');
     }
 
@@ -293,6 +345,16 @@ REGLAS CRÍTICAS / CRITICAL RULES:
 
     private handleJsonMessage(message: any): void {
         switch (message.type) {
+            case 'auth_ok':
+                console.log('[VoiceLive] 🔑 Authenticated, sending config...');
+                this.websocket?.send(JSON.stringify({
+                    type: 'config',
+                    voiceName: this.voiceName,
+                    systemInstruction: this.systemInstruction,
+                    maxOutputTokens: this.maxOutputTokens,
+                    maxBudgetUSD: this.maxBudgetUSD
+                }));
+                break;
             case 'connected':
                 console.log('[VoiceLive] ✓ Gemini session ready with voice:', message.voice);
                 this.isConnected = true;
@@ -301,6 +363,10 @@ REGLAS CRÍTICAS / CRITICAL RULES:
             case 'transcript':
                 console.log('[VoiceLive] 🤖 Agent:', message.text);
                 this.onTranscript?.(message.text);
+                break;
+            case 'userTranscript':
+                console.log('[VoiceLive] 👤 User:', message.text);
+                this.onUserTranscript?.(message.text);
                 break;
             case 'turnComplete':
                 console.log('[VoiceLive] Turn complete');
@@ -313,6 +379,10 @@ REGLAS CRÍTICAS / CRITICAL RULES:
             case 'usage':
                 this.onUsage?.(message.stats);
                 break;
+            case 'budgetExceeded':
+                console.warn(`[VoiceLive] 💸 Budget exceeded: $${message.spent.toFixed(6)} / $${message.limit}`);
+                this.onBudgetExceeded?.({ spent: message.spent, limit: message.limit });
+                break;
         }
     }
 
@@ -320,12 +390,20 @@ REGLAS CRÍTICAS / CRITICAL RULES:
         if (!this.audioContext) return;
 
         try {
-            // Decode audio (assuming PCM from Gemini)
             const audioBuffer = await this.decodeAudioData(audioData);
 
-            // Queue and play
-            this.audioQueue.push(audioBuffer);
-            this.playNextInQueue();
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+
+            const currentTime = this.audioContext.currentTime;
+            // Buffer slightly if we fell behind to avoid jitter
+            if (this.nextPlayTime < currentTime) {
+                this.nextPlayTime = currentTime + 0.05;
+            }
+
+            source.start(this.nextPlayTime);
+            this.nextPlayTime += audioBuffer.duration;
 
         } catch (error) {
             console.error('[VoiceLive] Audio playback error:', error);
@@ -333,43 +411,28 @@ REGLAS CRÍTICAS / CRITICAL RULES:
     }
 
     private async decodeAudioData(data: ArrayBuffer): Promise<AudioBuffer> {
-        // Create AudioBuffer from PCM16 data
-        const pcm16 = new Int16Array(data);
-        const float32 = new Float32Array(pcm16.length);
+        // Create AudioBuffer from PCM16 data, ensuring Little-Endian reading
+        const dataView = new DataView(data);
+        const length = data.byteLength / 2; // 2 bytes per 16-bit sample
+        const float32 = new Float32Array(length);
 
-        for (let i = 0; i < pcm16.length; i++) {
-            float32[i] = pcm16[i] / 32768;  // Convert to -1.0 to 1.0
+        for (let i = 0; i < length; i++) {
+            // true = little-endian, critical for raw PCM from APIs
+            const int16 = dataView.getInt16(i * 2, true);
+            float32[i] = int16 / 32768;  // Convert to -1.0 to 1.0
         }
 
-        const audioBuffer = this.audioContext!.createBuffer(1, float32.length, 24000);
+        const audioBuffer = this.audioContext!.createBuffer(1, length, 24000);
         audioBuffer.getChannelData(0).set(float32);
 
         return audioBuffer;
     }
 
-    private playNextInQueue(): void {
-        if (this.isPlaying || this.audioQueue.length === 0 || !this.audioContext) {
-            return;
-        }
-
-        this.isPlaying = true;
-        const audioBuffer = this.audioQueue.shift()!;
-
-        const source = this.audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(this.audioContext.destination);
-
-        source.onended = () => {
-            this.isPlaying = false;
-            this.playNextInQueue();  // Play next in queue
-        };
-
-        source.start();
-    }
-
     private stopPlayback(): void {
-        this.audioQueue = [];
-        this.isPlaying = false;
+        this.nextPlayTime = 0;
+        // In a true scheduling system, we would keep track of the active buffer sources
+        // and call .stop() on them. For simplicity, AudioContext suspension/closing
+        // is typically used on disconnect.
     }
 
     private float32ToPCM16(float32Array: Float32Array): ArrayBuffer {
