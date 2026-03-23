@@ -135,7 +135,10 @@ class TwilioCallService extends EventEmitter {
         const twimlUrl =
             `${params.backendUrl}/twilio/twiml` +
             `?campaignId=${encodeURIComponent(params.campaignId)}` +
-            `&sessionId=${encodeURIComponent(params.sessionId)}`;
+            `&sessionId=${encodeURIComponent(params.sessionId)}` +
+            `&voiceName=${encodeURIComponent(params.voiceName)}` +
+            `&systemInstruction=${encodeURIComponent(params.systemInstruction)}` +
+            `&to=${encodeURIComponent(params.to)}`;
 
         const call = await this.client.calls.create({
             to: params.to,
@@ -169,6 +172,7 @@ class TwilioCallService extends EventEmitter {
         sessionId: string,
         systemInstruction: string,
         voiceName: string,
+        to: string = '',
     ): Promise<void> {
         console.log(`[Twilio] Media stream connected — campaign=${campaignId} session=${sessionId}`);
 
@@ -247,7 +251,7 @@ class TwilioCallService extends EventEmitter {
                         agent,
                         campaignId,
                         sessionId,
-                        to: '',
+                        to,
                         startedAt: new Date(),
                         status: 'active',
                     };

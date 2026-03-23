@@ -242,14 +242,22 @@ app.get('/api/sessions/stats', (req, res) => {
  * We return TwiML that instructs Twilio to open a Media Stream to our WS endpoint.
  */
 app.post('/twilio/twiml', (req, res) => {
-    const campaignId = (req.query.campaignId as string) || '';
-    const sessionId  = (req.query.sessionId  as string) || '';
+    const campaignId        = (req.query.campaignId        as string) || '';
+    const sessionId         = (req.query.sessionId         as string) || '';
+    const voiceName         = (req.query.voiceName         as string) || 'Kore';
+    const systemInstruction = (req.query.systemInstruction as string) || '';
+    const to                = (req.query.to                as string) || '';
 
     const backendUrl = process.env.BACKEND_URL || `https://${req.headers.host}`;
     // Convert https:// → wss:// for the WebSocket URL
     const wsUrl = backendUrl.replace(/^https?:\/\//, (m) => (m.startsWith('https') ? 'wss://' : 'ws://'));
 
-    const streamUrl = `${wsUrl}/twilio/stream?campaignId=${encodeURIComponent(campaignId)}&sessionId=${encodeURIComponent(sessionId)}`;
+    const streamUrl = `${wsUrl}/twilio/stream`
+        + `?campaignId=${encodeURIComponent(campaignId)}`
+        + `&sessionId=${encodeURIComponent(sessionId)}`
+        + `&voiceName=${encodeURIComponent(voiceName)}`
+        + `&systemInstruction=${encodeURIComponent(systemInstruction)}`
+        + `&to=${encodeURIComponent(to)}`;
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -582,12 +590,13 @@ const twilioWss = new WebSocketServer({ noServer: true });
 
 twilioWss.on('connection', async (ws, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-    const campaignId       = url.searchParams.get('campaignId') || '';
-    const sessionId        = url.searchParams.get('sessionId')  || '';
-    const systemInstruction= url.searchParams.get('systemInstruction') || '';
-    const voiceName        = url.searchParams.get('voiceName')  || 'Kore';
+    const campaignId        = url.searchParams.get('campaignId')        || '';
+    const sessionId         = url.searchParams.get('sessionId')         || '';
+    const systemInstruction = url.searchParams.get('systemInstruction') || '';
+    const voiceName         = url.searchParams.get('voiceName')         || 'Kore';
+    const to                = url.searchParams.get('to')                || '';
 
-    await twilioCallService.handleMediaStream(ws, campaignId, sessionId, systemInstruction, voiceName);
+    await twilioCallService.handleMediaStream(ws, campaignId, sessionId, systemInstruction, voiceName, to);
 });
 
 // Handle WebSocket upgrade for /voice/live and /twilio/stream paths
