@@ -8,7 +8,8 @@
  *   Gemini Live API (PCM16 24kHz)   ──► downsample to PCM16 8kHz ──► μ-law ──► Twilio
  */
 
-import { Twilio } from 'twilio';
+import twilio from 'twilio';
+type TwilioClient = ReturnType<typeof twilio>;
 import { EventEmitter } from 'events';
 import type WebSocket from 'ws';
 import { createGeminiLiveAgent, type GeminiLiveAgent } from './GeminiLiveAgent.js';
@@ -95,7 +96,7 @@ export interface ActiveCall {
 // ─── TwilioCallService ────────────────────────────────────────────────────────
 
 class TwilioCallService extends EventEmitter {
-    private client: Twilio | null = null;
+    private client: TwilioClient | null = null;
     private activeCalls = new Map<string, ActiveCall>();
 
     /** Call once on server startup. No-ops gracefully if env vars are missing. */
@@ -106,7 +107,7 @@ class TwilioCallService extends EventEmitter {
             console.warn('[Twilio] Credentials not set — real-call feature disabled');
             return;
         }
-        this.client = new Twilio(sid, token);
+        this.client = twilio(sid, token);
         console.log('[Twilio] ✓ Client initialized');
     }
 
@@ -132,12 +133,12 @@ class TwilioCallService extends EventEmitter {
         if (!from) throw new Error('TWILIO_PHONE_NUMBER not set in .env');
 
         // Twilio calls this URL when the callee answers — we return TwiML with <Stream>
+        // NOTE: systemInstruction is intentionally excluded from the URL to stay under
+        // Twilio's 4000-char limit. The twiml handler retrieves it from sessionManager.
         const twimlUrl =
             `${params.backendUrl}/twilio/twiml` +
-            `?campaignId=${encodeURIComponent(params.campaignId)}` +
-            `&sessionId=${encodeURIComponent(params.sessionId)}` +
+            `?sessionId=${encodeURIComponent(params.sessionId)}` +
             `&voiceName=${encodeURIComponent(params.voiceName)}` +
-            `&systemInstruction=${encodeURIComponent(params.systemInstruction)}` +
             `&to=${encodeURIComponent(params.to)}`;
 
         const call = await this.client.calls.create({

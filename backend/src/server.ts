@@ -237,26 +237,43 @@ app.get('/api/sessions/stats', (req, res) => {
 // ========== TWILIO REAL CALL ENDPOINTS ==========
 
 /**
+ * GET /api/calls/from-numbers
+ * Returns the list of available outbound phone numbers configured in .env.
+ * TWILIO_PHONE_NUMBER can be a single number or comma-separated list.
+ */
+app.get('/api/calls/from-numbers', (_req, res) => {
+    const raw = process.env.TWILIO_PHONE_NUMBER || '';
+    const numbers = raw
+        .split(',')
+        .map(n => n.trim())
+        .filter(Boolean)
+        .map(n => ({ number: n }));
+    res.json(numbers);
+});
+
+/**
  * POST /twilio/twiml
  * Twilio hits this webhook when the callee answers the outbound call.
  * We return TwiML that instructs Twilio to open a Media Stream to our WS endpoint.
  */
 app.post('/twilio/twiml', (req, res) => {
-    const campaignId        = (req.query.campaignId        as string) || '';
-    const sessionId         = (req.query.sessionId         as string) || '';
-    const voiceName         = (req.query.voiceName         as string) || 'Kore';
-    const systemInstruction = (req.query.systemInstruction as string) || '';
-    const to                = (req.query.to                as string) || '';
+    const sessionId = (req.query.sessionId as string) || '';
+    const voiceName = (req.query.voiceName as string) || 'Kore';
+    const to        = (req.query.to        as string) || '';
+
+    // Retrieve systemInstruction and campaignId from the stored session
+    const session = sessionManager.getSession(sessionId);
+    const systemInstruction = session?.systemPrompt || '';
+    const campaignId        = session?.campaignId   || '';
 
     const backendUrl = process.env.BACKEND_URL || `https://${req.headers.host}`;
     // Convert https:// → wss:// for the WebSocket URL
     const wsUrl = backendUrl.replace(/^https?:\/\//, (m) => (m.startsWith('https') ? 'wss://' : 'ws://'));
 
+    // systemInstruction is NOT included in the stream URL — retrieved from session in the WS handler
     const streamUrl = `${wsUrl}/twilio/stream`
-        + `?campaignId=${encodeURIComponent(campaignId)}`
-        + `&sessionId=${encodeURIComponent(sessionId)}`
+        + `?sessionId=${encodeURIComponent(sessionId)}`
         + `&voiceName=${encodeURIComponent(voiceName)}`
-        + `&systemInstruction=${encodeURIComponent(systemInstruction)}`
         + `&to=${encodeURIComponent(to)}`;
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -299,7 +316,7 @@ app.post('/api/calls/outbound', async (req, res) => {
         // Create a session to track this call
         const finalSessionId = sessionId || `call-${campaignId}-${Date.now()}`;
         try {
-            sessionManager.createSession({ campaignId, phoneNumber: to, agentType: 'prompt', systemPrompt: systemInstruction });
+            sessionManager.createSession({ sessionId: finalSessionId, campaignId, phoneNumber: to, agentType: 'prompt', systemPrompt: systemInstruction });
         } catch (_) {
             // Session may already exist
         }
@@ -590,17 +607,21 @@ const twilioWss = new WebSocketServer({ noServer: true });
 
 twilioWss.on('connection', async (ws, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-    const campaignId        = url.searchParams.get('campaignId')        || '';
-    const sessionId         = url.searchParams.get('sessionId')         || '';
-    const systemInstruction = url.searchParams.get('systemInstruction') || '';
-    const voiceName         = url.searchParams.get('voiceName')         || 'Kore';
-    const to                = url.searchParams.get('to')                || '';
+    const sessionId = url.searchParams.get('sessionId') || '';
+    const voiceName = url.searchParams.get('voiceName') || 'Kore';
+    const to        = url.searchParams.get('to')        || '';
+
+    // Retrieve systemInstruction and campaignId from the stored session
+    const session           = sessionManager.getSession(sessionId);
+    const systemInstruction = session?.systemPrompt || '';
+    const campaignId        = session?.campaignId   || '';
 
     await twilioCallService.handleMediaStream(ws, campaignId, sessionId, systemInstruction, voiceName, to);
 });
 
 // Handle WebSocket upgrade for /voice/live and /twilio/stream paths
 httpServer.on('upgrade', (request, socket, head) => {
+    console.log(`[WS-Upgrade] path=${request.url} from=${request.socket.remoteAddress} ua=${request.headers['user-agent'] || '-'}`);
     const url = new URL(request.url || '', `http://${request.headers.host}`);
 
     if (url.pathname === '/voice/live') {
