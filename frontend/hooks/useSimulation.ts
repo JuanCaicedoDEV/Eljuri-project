@@ -62,7 +62,7 @@ export const useSimulation = (sessionId: string, onAudioReceived?: (audioBase64:
     // Keep legacy HTTP method if needed, but primary is socket now
     const sendMessage = async (text: string) => {
         const userMessage: ChatMessage = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: crypto.randomUUID().toString().substr(2, 9),
             role: 'user',
             content: text,
             timestamp: new Date().toISOString(),

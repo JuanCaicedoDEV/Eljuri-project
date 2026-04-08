@@ -18,7 +18,7 @@ class PhoneNumberManager {
         }
 
         const phoneNumber: PhoneNumber = {
-            id: `phone-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: `phone-${Date.now()}-${crypto.randomUUID().toString().substr(2, 9)}`,
             phoneNumber: dto.phoneNumber,
             campaignId: dto.campaignId || null,
             status: 'available',

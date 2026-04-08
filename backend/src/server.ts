@@ -15,6 +15,9 @@ import { issueWsToken, verifyWsToken, requireApiKey } from './middleware/auth.js
 import { sessionManager } from './services/sessionManager.js';
 import { phoneNumberManager } from './services/phoneNumberManager.js';
 import { twilioCallService } from './services/TwilioCallService.js';
+import authRouter from "./routes/users.js"
+import {validarUsuario} from "./middleware/authUsers.js"
+import cookieParser from 'cookie-parser'; 
 
 // ========== RATE LIMITERS ==========
 
@@ -60,6 +63,8 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning', 'bypass-tunnel-reminder', 'x-custom-header']
 }));
 app.use(express.json());
+app.use(cookieParser())
+
 
 // STT Route
 app.use('/api/stt', sttRouter);
@@ -78,7 +83,7 @@ app.post('/api/auth/token', tokenIssueLimiter, requireApiKey, (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
+app.use("/api", authRouter)
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
@@ -98,7 +103,7 @@ app.get('/api/phone-numbers', (req, res) => {
     }
 });
 
-app.post('/api/phone-numbers', (req, res) => {
+app.post('/api/phone-numbers', validarUsuario, (req, res) => {
     try {
         const phoneNumber = phoneNumberManager.createPhoneNumber(req.body);
         res.status(201).json(phoneNumber);
@@ -107,18 +112,20 @@ app.post('/api/phone-numbers', (req, res) => {
     }
 });
 
-app.put('/api/phone-numbers/:id', (req, res) => {
+app.put('/api/phone-numbers/:id', validarUsuario, (req, res) => {
     try {
-        const phoneNumber = phoneNumberManager.updatePhoneNumber(req.params.id, req.body);
+        const id = String(req.params.id)
+        const phoneNumber = phoneNumberManager.updatePhoneNumber(id, req.body);
         res.json(phoneNumber);
     } catch (error: any) {
         res.status(400).json({ error: error.message });
     }
 });
 
-app.delete('/api/phone-numbers/:id', (req, res) => {
+app.delete('/api/phone-numbers/:id', validarUsuario, (req, res) => {
     try {
-        const success = phoneNumberManager.deletePhoneNumber(req.params.id);
+        const id = String(req.params.id);
+        const success = phoneNumberManager.deletePhoneNumber(id);
         if (success) {
             res.status(204).send();
         } else {
@@ -291,7 +298,7 @@ app.post('/twilio/twiml', (req, res) => {
  * POST /api/calls/outbound
  * Frontend triggers an outbound call. Body: { to, campaignId, sessionId, systemInstruction, voiceName }
  */
-app.post('/api/calls/outbound', async (req, res) => {
+app.post('/api/calls/outbound', validarUsuario, async (req, res) => {
     try {
         if (!twilioCallService.isEnabled()) {
             res.status(503).json({ error: 'Twilio not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER in .env' });
@@ -342,9 +349,10 @@ app.post('/api/calls/outbound', async (req, res) => {
  * POST /api/calls/:callSid/end
  * Hang up a specific call.
  */
-app.post('/api/calls/:callSid/end', async (req, res) => {
+app.post('/api/calls/:callSid/end', validarUsuario, async (req, res) => {
     try {
-        await twilioCallService.endCall(req.params.callSid);
+        const callSid = String(req.params.callSid)
+        await twilioCallService.endCall(callSid);
         res.json({ status: 'ended', callSid: req.params.callSid });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

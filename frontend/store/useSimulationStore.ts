@@ -188,7 +188,7 @@ PASO 11 (Pregunta 8.1):
 
     // Session management
     createSession: (campaignId: string, phoneNumber?: string) => {
-        const sessionId = `session-${campaignId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const sessionId = `session-${campaignId}-${Date.now()}-${crypto.randomUUID().toString().substr(2, 9)}`;
         const newSession: SessionState = {
             sessionId,
             campaignId,

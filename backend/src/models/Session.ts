@@ -52,7 +52,7 @@ export interface SessionSummary {
 // Helper function to create a new session
 export function createSession(dto: CreateSessionDTO): Session {
     return {
-        sessionId: dto.sessionId || `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        sessionId: dto.sessionId || `session-${Date.now()}-${crypto.randomUUID().toString().substr(2, 9)}`,
         campaignId: dto.campaignId,
         phoneNumber: dto.phoneNumber || null,
         status: 'idle',
