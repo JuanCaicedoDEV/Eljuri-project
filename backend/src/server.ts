@@ -58,19 +58,20 @@ twilioCallService.init();
 
 const app = express();
 app.use(cors({
-    origin: '*',
+    origin: process.env["ALLOWED_ORIGINS"]?.split(",")||[],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning', 'bypass-tunnel-reminder', 'x-custom-header']
 }));
+console.log(`Allowed origins: ${process.env["ALLOWED_ORIGINS"]?.split(",")||[]}`)
 app.use(express.json());
 app.use(cookieParser())
 
 
 // STT Route
-app.use('/api/stt', sttRouter);
+app.use('/api/stt', validarUsuario, sttRouter);
 
 // Extraction Route
-app.use('/api/extract', extractRouter);
+app.use('/api/extract', validarUsuario, extractRouter);
 
 // ========== AUTH ENDPOINT ==========
 
@@ -80,7 +81,8 @@ app.post('/api/auth/token', tokenIssueLimiter, requireApiKey, (req, res) => {
         const token = issueWsToken(sessionId);
         res.json({ token });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.log(`Error /api/auth/token: ${error.message}`)
+        res.status(500).json({"error":"Problema en el flujo del codigo, validar logs"});
     }
 });
 app.use("/api", authRouter)
@@ -94,7 +96,7 @@ const io = new Server(httpServer, {
 
 // ========== PHONE NUMBER ENDPOINTS ==========
 
-app.get('/api/phone-numbers', (req, res) => {
+app.get('/api/phone-numbers', validarUsuario, (req, res) => {
     try {
         const phoneNumbers = phoneNumberManager.getAllPhoneNumbers();
         res.json(phoneNumbers);
@@ -136,16 +138,17 @@ app.delete('/api/phone-numbers/:id', validarUsuario, (req, res) => {
     }
 });
 
-app.get('/api/phone-numbers/campaign/:campaignId', (req, res) => {
+app.get('/api/phone-numbers/campaign/:campaignId', validarUsuario, (req, res) => {
     try {
-        const phoneNumbers = phoneNumberManager.getPhoneNumbersByCampaign(req.params.campaignId);
+        const id = String(req.params.campaignId)
+        const phoneNumbers = phoneNumberManager.getPhoneNumbersByCampaign(id);
         res.json(phoneNumbers);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch phone numbers' });
     }
 });
 
-app.get('/api/phone-numbers/stats', (req, res) => {
+app.get('/api/phone-numbers/stats', validarUsuario, (req, res) => {
     try {
         const stats = phoneNumberManager.getStatistics();
         res.json(stats);
@@ -156,7 +159,7 @@ app.get('/api/phone-numbers/stats', (req, res) => {
 
 // ========== SESSION ENDPOINTS ==========
 
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', validarUsuario, (req, res) => {
     try {
         const session = sessionManager.createSession(req.body);
         // Broadcast new session to all clients
@@ -167,7 +170,7 @@ app.post('/api/sessions', (req, res) => {
     }
 });
 
-app.get('/api/sessions', (req, res) => {
+app.get('/api/sessions', validarUsuario, (req, res) => {
     try {
         const sessions = sessionManager.getAllSessions();
         res.json(sessions);
@@ -176,7 +179,7 @@ app.get('/api/sessions', (req, res) => {
     }
 });
 
-app.get('/api/sessions/active', (req, res) => {
+app.get('/api/sessions/active', validarUsuario, (req, res) => {
     try {
         const sessions = sessionManager.getActiveSessions();
         res.json(sessions);
@@ -185,18 +188,20 @@ app.get('/api/sessions/active', (req, res) => {
     }
 });
 
-app.get('/api/sessions/campaign/:campaignId', (req, res) => {
+app.get('/api/sessions/campaign/:campaignId', validarUsuario, (req, res) => {
     try {
-        const sessions = sessionManager.getSessionsByCampaign(req.params.campaignId);
+        const id = String(req.params.campaignId)
+        const sessions = sessionManager.getSessionsByCampaign(id);
         res.json(sessions);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch sessions' });
     }
 });
 
-app.get('/api/sessions/campaign/:campaignId/summary', (req, res) => {
+app.get('/api/sessions/campaign/:campaignId/summary', validarUsuario, (req, res) => {
     try {
-        const summary = sessionManager.getCampaignSummary(req.params.campaignId);
+        const id = String(req.params.campaignId)
+        const summary = sessionManager.getCampaignSummary(id);
         if (summary) {
             res.json(summary);
         } else {
@@ -207,9 +212,10 @@ app.get('/api/sessions/campaign/:campaignId/summary', (req, res) => {
     }
 });
 
-app.get('/api/sessions/:sessionId', (req, res) => {
+app.get('/api/sessions/:sessionId', validarUsuario, (req, res) => {
     try {
-        const session = sessionManager.getSession(req.params.sessionId);
+        const id = String(req.params.sessionId)
+        const session = sessionManager.getSession(id);
         if (session) {
             res.json(session);
         } else {
@@ -220,19 +226,20 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     }
 });
 
-app.post('/api/sessions/:sessionId/terminate', (req, res) => {
+app.post('/api/sessions/:sessionId/terminate', validarUsuario, (req, res) => {
     try {
-        sessionManager.terminateSession(req.params.sessionId);
-        const session = sessionManager.getSession(req.params.sessionId);
+        const id = String(req.params.sessionId)
+        sessionManager.terminateSession(id);
+        const session = sessionManager.getSession(id);
         // Broadcast session termination
-        io.emit('session_terminated', { sessionId: req.params.sessionId });
+        io.emit('session_terminated', { sessionId: id });
         res.json(session);
     } catch (error) {
         res.status(500).json({ error: 'Failed to terminate session' });
     }
 });
 
-app.get('/api/sessions/stats', (req, res) => {
+app.get('/api/sessions/stats', validarUsuario, (req, res) => {
     try {
         const stats = sessionManager.getStatistics();
         res.json(stats);
@@ -248,7 +255,7 @@ app.get('/api/sessions/stats', (req, res) => {
  * Returns the list of available outbound phone numbers configured in .env.
  * TWILIO_PHONE_NUMBER can be a single number or comma-separated list.
  */
-app.get('/api/calls/from-numbers', (_req, res) => {
+app.get('/api/calls/from-numbers', validarUsuario, (_req, res) => {
     const raw = process.env.TWILIO_PHONE_NUMBER || '';
     const numbers = raw
         .split(',')
@@ -341,7 +348,7 @@ app.post('/api/calls/outbound', validarUsuario, async (req, res) => {
         res.json({ callSid, sessionId: finalSessionId, status: 'dialing' });
     } catch (error: any) {
         console.error('[Twilio] Outbound call error:', error.message);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({"error":"Error en el flujo del codigo, revisar logs del servidor"});
     }
 });
 
@@ -355,7 +362,8 @@ app.post('/api/calls/:callSid/end', validarUsuario, async (req, res) => {
         await twilioCallService.endCall(callSid);
         res.json({ status: 'ended', callSid: req.params.callSid });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.log(`Error en /api/calls/:callSid/end: ${error.message}`)
+        res.status(500).json({"error":"Error en el flujo del codigo, revisar logs del servidor"});
     }
 });
 
@@ -363,7 +371,7 @@ app.post('/api/calls/:callSid/end', validarUsuario, async (req, res) => {
  * GET /api/calls
  * List currently active Twilio calls.
  */
-app.get('/api/calls', (_req, res) => {
+app.get('/api/calls', validarUsuario, (_req, res) => {
     const calls = twilioCallService.getActiveCalls().map(c => ({
         callSid: c.callSid,
         sessionId: c.sessionId,
