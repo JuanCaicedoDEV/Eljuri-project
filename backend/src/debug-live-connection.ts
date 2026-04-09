@@ -20,8 +20,6 @@ async function testConnection() {
     delete process.env.GCLOUD_PROJECT;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-    console.log(`Using API Key: ${apiKey.substring(0, 5)}...`);
-
     const client = new GoogleGenAI({
         apiKey: apiKey
     });

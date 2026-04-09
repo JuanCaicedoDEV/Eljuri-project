@@ -612,7 +612,7 @@ httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Session Manager and Phone Number Manager initialized');
     if (process.env.GOOGLE_API_KEY) {
-        console.log('GOOGLE_API_KEY is found (starting with ' + process.env.GOOGLE_API_KEY.substring(0, 5) + '...)');
+        console.log("GOOGLE_API_KEY is found");
     } else {
         console.error('CRITICAL: GOOGLE_API_KEY is missing!');
     }

@@ -6,8 +6,9 @@ dotenv.config();
 
 const API_KEY = process.env.GOOGLE_API_KEY;
 
-console.log('\n=== TESTING GEMINI APIs ===\n');
-console.log('API Key:', API_KEY ? `${API_KEY.substring(0, 15)}...` : 'NOT FOUND');
+if (API_KEY == ""){
+    console.log("GOOGLE_API_KEY not found")
+}
 
 // Test 1: Gemini LLM
 async function testLLM() {
